@@ -146,9 +146,28 @@ const App = () => {
           }
         })
 
-        const response = await restOperation.response
-        const data = await response.body.text()
-        setApiResponse(`Status: ${response.statusCode}\n\n${data}`)
+        try {
+          const response = await restOperation.response
+          const data = await response.body.text()
+
+          // Always show the response, regardless of status code
+          setApiResponse(`Status: ${response.statusCode}\n\n${data}`)
+        } catch (amplifyError) {
+          // Amplify throws errors for non-2xx status codes, extract the response body
+          const errorResponse = amplifyError._response || amplifyError.response
+
+          if (errorResponse) {
+            // For Amplify v6, the body is typically already a string containing JSON
+            const responseBody = typeof errorResponse.body === 'string'
+              ? errorResponse.body
+              : JSON.stringify(errorResponse.body)
+
+            setApiResponse(`Status: ${errorResponse.statusCode}\n\n${responseBody}`)
+          } else {
+            // Re-throw if it's not an HTTP response error
+            throw amplifyError
+          }
+        }
       } else {
         // Use regular fetch for non-IAM endpoints
         const baseUrl = import.meta.env.VITE_API_ENDPOINT || 'PLACEHOLDER_API_ENDPOINT'
@@ -162,11 +181,21 @@ const App = () => {
         })
 
         const data = await response.text()
+
+        // Always show the response with status, regardless of success/error
         setApiResponse(`Status: ${response.status}\n\n${data}`)
       }
     } catch (error) {
       console.error('API call error:', error)
-      setApiResponse(`Error: ${error.message}`)
+
+      // Handle non-Amplify errors (like network errors, credential errors, etc.)
+      if (error.status) {
+        // Regular fetch error with status
+        setApiResponse(`Status: ${error.status}\n\n${error.message || error.toString()}`)
+      } else {
+        // Generic error without status info
+        setApiResponse(`Error: ${error.message || error.toString()}`)
+      }
     } finally {
       setApiLoading(false)
     }
