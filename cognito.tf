@@ -83,6 +83,13 @@ resource "aws_cognito_user_pool_client" "default" {
   ]
 }
 
+resource "awscc_cognito_managed_login_branding" "default" {
+  user_pool_id = aws_cognito_user_pool.this.id
+  client_id    = aws_cognito_user_pool_client.default.id
+
+  use_cognito_provided_values = true
+}
+
 resource "aws_cognito_user_pool_domain" "this" {
   domain       = "igorovo-${random_string.domain_suffix.result}"
   user_pool_id = aws_cognito_user_pool.this.id
