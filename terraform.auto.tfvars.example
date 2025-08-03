@@ -1,0 +1,9 @@
+# Copy this file to terraform.auto.tfvars and configure your settings
+# terraform.auto.tfvars is automatically loaded by Terraform
+
+# AWS Configuration
+aws_region  = "us-east-1"
+aws_profile = "your-profile-name"  # Replace with your AWS CLI profile
+
+# CORS Configuration (optional)
+# apigw_cors_allow_origins_extra = ["http://localhost:3000", "http://localhost:5173"]

@@ -1,0 +1,11 @@
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Local configuration files (contain secrets/personal settings)
+*.auto.tfvars
+
+# Build artifacts
+lambda_function.zip
