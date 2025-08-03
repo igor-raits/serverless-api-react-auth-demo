@@ -5,6 +5,13 @@ set -e
 
 # Configuration
 AWS_PROFILE="${AWS_PROFILE:-default}"
+DEBUG_MODE="${DEBUG:-false}"
+
+# Check for debug flag
+if [ "$1" = "--debug" ] || [ "$1" = "-d" ]; then
+    DEBUG_MODE="true"
+    echo "🐛 Debug mode enabled"
+fi
 
 echo "🔧 Getting Terraform outputs..."
 echo "📋 Using AWS Profile: $AWS_PROFILE"
@@ -52,6 +59,10 @@ export VITE_API_ENDPOINT="$API_ENDPOINT"
 export VITE_AWS_REGION="$AWS_REGION"
 export VITE_REDIRECT_SIGN_IN="https://$CLOUDFRONT_DOMAIN/callback"
 export VITE_REDIRECT_SIGN_OUT="https://$CLOUDFRONT_DOMAIN/"
+export VITE_DEBUG="$DEBUG_MODE"
+
+echo "🔧 Build configuration:"
+echo "  Debug mode: $DEBUG_MODE"
 
 # Build the app
 npm run build
@@ -75,9 +86,16 @@ echo ""
 echo "🎉 Deployment complete!"
 echo "🌍 Your app is available at: https://$CLOUDFRONT_DOMAIN"
 echo "🔐 Managed Login domain: https://$OAUTH_DOMAIN.auth.$AWS_REGION.amazoncognito.com"
+if [ "$DEBUG_MODE" = "true" ]; then
+    echo "🐛 Debug logging is ENABLED - check browser console for detailed logs"
+fi
 echo ""
 echo "📝 Next steps:"
 echo "1. Create a user in the Cognito User Pool"
 echo "2. Visit your app URL and test the authentication flow"
 echo "3. Check the JWT tokens and API calls"
 echo "4. Customize the Managed Login branding in AWS Console"
+echo ""
+echo "💡 Usage tips:"
+echo "  • Deploy with debug: ./build-and-deploy.sh --debug"
+echo "  • Deploy production: ./build-and-deploy.sh"

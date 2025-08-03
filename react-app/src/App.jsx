@@ -4,6 +4,14 @@ import { get } from 'aws-amplify/api'
 import { jwtDecode } from 'jwt-decode'
 import CallbackPage from './CallbackPage.jsx'
 
+// Debug logging utility - controlled by environment variable
+const DEBUG = import.meta.env.VITE_DEBUG === 'true' || import.meta.env.NODE_ENV === 'development'
+const debugLog = (...args) => {
+  if (DEBUG) {
+    console.log('[DEBUG]', ...args)
+  }
+}
+
 const App = () => {
   const [user, setUser] = useState(null)
   const [tokens, setTokens] = useState(null)
@@ -32,7 +40,7 @@ const App = () => {
       setCachedSession(session) // Cache the session
 
       // Debug: Always check what credentials we have
-      console.log('Initial auth check:', {
+      debugLog('Initial auth check:', {
         hasUser: !!currentUser,
         hasTokens: !!session.tokens,
         hasCredentials: !!session.credentials,
@@ -47,7 +55,7 @@ const App = () => {
       // Even when not authenticated, we should get unauthenticated credentials
       try {
         const unauthSession = await fetchAuthSession()
-        console.log('Unauthenticated session check:', {
+        debugLog('Unauthenticated session check:', {
           hasCredentials: !!unauthSession.credentials,
           identityId: unauthSession.identityId
         })
@@ -62,7 +70,7 @@ const App = () => {
   const handleSignIn = async () => {
     try {
       // Debug: Log the current Amplify configuration
-      console.log('Amplify config check:', {
+      debugLog('Amplify config check:', {
         domain: import.meta.env.VITE_OAUTH_DOMAIN,
         redirectSignIn: import.meta.env.VITE_REDIRECT_SIGN_IN,
         redirectSignOut: import.meta.env.VITE_REDIRECT_SIGN_OUT
@@ -98,7 +106,7 @@ const App = () => {
 
         // Check if we need to refresh the session
         if (!session || !session.credentials) {
-          console.log('Fetching fresh session (no cached credentials)')
+          debugLog('Fetching fresh session (no cached credentials)')
           session = await fetchAuthSession()
           setCachedSession(session)
         } else {
@@ -107,19 +115,19 @@ const App = () => {
           const fiveMinutesFromNow = new Date(Date.now() + 5 * 60 * 1000)
 
           if (expiration && expiration < fiveMinutesFromNow) {
-            console.log('Refreshing session (credentials expiring soon)')
+            debugLog('Refreshing session (credentials expiring soon)')
             session = await fetchAuthSession()
             setCachedSession(session)
           } else {
-            console.log('Using cached session (credentials still valid)')
+            debugLog('Using cached session (credentials still valid)')
           }
         }
 
-        console.log('Session credentials:', {
+        debugLog('Session credentials:', {
           hasCredentials: !!session.credentials,
           isAuthenticated: !!user,
-          credentialsType: session.credentials ? 'Available' : 'None',
           identityId: session.identityId,
+          credentialsType: session.credentials ? 'Available' : 'None',
           hasIdToken: !!tokens?.idToken,
           expiresAt: session.credentials?.expiration?.toISOString()
         })
@@ -134,7 +142,7 @@ const App = () => {
         // For authenticated users, add the ID token header
         if (user && tokens?.idToken) {
           headers['X-Cognito-Id-Token'] = tokens.idToken.toString()
-          console.log('Adding ID token header for authenticated call')
+          debugLog('Adding ID token header for authenticated call')
         }
 
         // Use Amplify's REST client with custom headers
