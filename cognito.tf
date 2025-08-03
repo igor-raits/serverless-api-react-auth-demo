@@ -75,11 +75,9 @@ resource "aws_cognito_user_pool_client" "default" {
   refresh_token_validity = 7  # 7 days
 
   explicit_auth_flows = [
-    "ALLOW_CUSTOM_AUTH",
-    "ALLOW_REFRESH_TOKEN_AUTH",
-    "ALLOW_USER_AUTH",
-    "ALLOW_USER_SRP_AUTH",
-    "ALLOW_USER_PASSWORD_AUTH",
+    "ALLOW_REFRESH_TOKEN_AUTH", # Required for token refresh
+    "ALLOW_USER_SRP_AUTH",      # Used in test_auth.py for SRP authentication
+    "ALLOW_USER_PASSWORD_AUTH", # Used in test_auth.py for direct password auth
   ]
 }
 
