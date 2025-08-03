@@ -170,25 +170,243 @@ python test_auth.py
         └── config.js              # AWS Amplify configuration
 ```
 
-## 🔐 Authentication Methods
+## 🔐 Authorization Architecture Layers
 
-### 1. No Authentication (`/test/plain`)
-- Direct API access without any authentication
-- No headers or signatures required
+This demo showcases a **multi-layered authorization architecture** that progresses from completely public access to fine-grained user-specific permissions:
 
-### 2. AWS IAM Authentication (`/test/auth`, `/test/public`)
-- Uses AWS Signature Version 4 (SigV4)
-- Requires valid AWS credentials
-- Different IAM policies for authenticated vs unauthenticated users
+### Layer 1: API Endpoints and Their Requirements
 
-### 3. Cognito Authentication
-**User Pool Authentication:**
-- Username/password or SRP (Secure Remote Password)
-- Returns JWT tokens (ID, Access, Refresh)
+The demo includes three endpoints that demonstrate different authorization patterns:
 
-**Identity Pool Integration:**
-- Exchanges User Pool tokens for AWS credentials
-- Enables fine-grained IAM permissions
+**`GET /test/plain`**
+- **Requirement:** None - completely public
+- **Access:** Anyone on the internet
+- **Use Case:** Health checks, public documentation, marketing pages
+
+**`GET /test/public`**
+- **Requirement:** Valid AWS credentials (any AWS IAM user/role)
+- **Access:** Anyone with AWS credentials that have `execute-api:Invoke` permission
+- **Use Case:** Semi-public APIs that need basic AWS authentication but not user identity
+
+**`GET /test/auth`**
+- **Requirement:** AWS credentials obtained through Cognito authentication flow
+- **Access:** Users who have authenticated via Cognito and obtained AWS credentials
+- **Use Case:** User-specific APIs that need identity context and authorization
+
+### Layer 2: IAM Roles and Assignment Logic
+
+**The Cognito Identity Pool** acts as a credential broker, exchanging Cognito tokens for temporary AWS credentials mapped to specific IAM roles:
+
+#### Role Assignment Hierarchy
+
+**1. Unauthenticated Role**
+- **When assigned:** When requesting AWS credentials without providing any Cognito tokens
+- **Typical permissions:** Very limited - only specific "public" endpoints
+- **Example access:** Can call `/test/public` but not `/test/auth`
+
+**2. Default Authenticated Role**
+- **When assigned:** When providing valid Cognito User Pool tokens but no specific group mapping applies
+- **Typical permissions:** Standard user access to most application endpoints
+- **Example access:** Can call both `/test/public` and `/test/auth`
+
+**3. Group-Mapped Roles**
+- **When assigned:** When user belongs to specific Cognito groups (Admin, Viewer, etc.)
+- **Role selection:** Identity Pool examines `cognito:groups` claim in JWT and maps to specialized roles
+- **Typical permissions:** Role-specific access patterns
+
+#### Group-to-Role Mapping Logic
+
+The Identity Pool can be configured with **mapping rules** that examine JWT claims and assign different IAM roles:
+
+**Mapping Rule Priority:**
+1. Check if user has `cognito:groups` containing "Admin" → Assign Admin IAM role
+2. Check if user has `cognito:groups` containing "Viewer" → Assign Viewer IAM role
+3. Fallback to default authenticated role
+
+**Real-World Scenario:**
+```
+User authenticates → JWT contains "cognito:groups": ["Admin"]
+                  → Identity Pool sees "Admin" group
+                  → Maps to Admin IAM role with elevated permissions
+                  → User can now access admin-only endpoints
+```
+
+#### Role Permission Examples
+
+**Admin Role Permissions:**
+- All API Gateway endpoints (`execute-api:Invoke` on `*/*/*`)
+- Full database operations (`dynamodb:GetItem`, `dynamodb:Query`, `dynamodb:PutItem`, `dynamodb:DeleteItem`)
+- Complete S3 access (`s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`)
+
+**Viewer Role Permissions:**
+- Read-only API endpoints (`execute-api:Invoke` on `*/*/GET/*`)
+- Database read operations (`dynamodb:GetItem`, `dynamodb:Query`)
+- S3 object reading (`s3:GetObject`)
+
+**Standard Authenticated Role Permissions:**
+- Most API endpoints except admin-specific ones
+- User-scoped database operations
+- User-scoped S3 access
+
+### Layer 3: Group Priority and Precedence
+
+**Cognito Groups** have a **precedence value** that determines which group takes priority when a user belongs to multiple groups:
+
+**Group Precedence Example:**
+- Admin group: precedence = 0 (highest priority)
+- Manager group: precedence = 10
+- Viewer group: precedence = 99 (lowest priority)
+
+**Multi-Group Scenario:**
+```
+User belongs to: ["Manager", "Viewer"]
+→ Identity Pool sees both groups
+→ "Manager" has higher precedence (lower number)
+→ User gets Manager IAM role permissions
+```
+
+### Layer 4: Fine-Grained Authorization via JWT Parsing
+
+**Beyond IAM:** Once inside the Lambda function, you can parse the JWT token for **user-specific authorization** that goes beyond what IAM roles can provide.
+
+#### JWT Token Structure
+
+```json
+{
+  "sub": "12345678-1234-1234-1234-123456789012",
+  "email": "user@example.com",
+  "cognito:groups": ["Admin", "ProjectManager"],
+  "cognito:username": "user@example.com"
+}
+```
+
+**Note:** Custom attributes like `custom:department` or `custom:project_ids` can be configured in the Cognito User Pool and automatically mapped from federated identity providers (Okta, Auth0, etc.). This enables department-based or project-based authorization patterns.
+
+#### Lambda Authorization Patterns
+
+**Pattern 1: Resource Ownership**
+```python
+def check_resource_access(jwt_payload, resource_id):
+    user_id = jwt_payload.get("sub")
+
+    # Check if user owns the resource
+    resource = get_resource(resource_id)
+    if resource.owner_id == user_id:
+        return True
+
+    # Check group-based override
+    user_groups = jwt_payload.get("cognito:groups", [])
+    if "Admin" in user_groups:
+        return True
+
+    return False
+```
+
+**Pattern 2: Department-Based Access**
+```python
+def check_department_access(jwt_payload, resource_id):
+    user_dept = jwt_payload.get("custom:department")  # Requires User Pool custom attribute
+
+    resource = get_resource(resource_id)
+    return resource.department == user_dept
+```
+
+**Pattern 3: Project-Based Access**
+```python
+def check_project_access(jwt_payload, resource_id):
+    user_projects = jwt_payload.get("custom:project_ids", "").split(",")  # Custom attribute
+
+    resource = get_resource(resource_id)
+    return resource.project_id in user_projects
+```
+
+### Dynamic Group Assignment (Optional Extension)
+
+**Cognito Hooks for Advanced Scenarios:** You can use Cognito Lambda triggers to dynamically assign groups during user lifecycle events. This is **purely optional** and not required for the demo, but shows the extensibility:
+
+```python
+# Pre Token Generation Lambda trigger (optional advanced pattern)
+def lambda_handler(event, context):
+    # Handle token generation events where group assignment is needed
+    # TokenGeneration_HostedAuth: Cognito Hosted UI sign-in (includes federated providers)
+    # TokenGeneration_Authentication: Direct API authentication flows
+    if event["triggerSource"] in {"TokenGeneration_HostedAuth", "TokenGeneration_Authentication"}:
+
+        user_pool_id = event["userPoolId"]
+        username = event["userName"]
+
+        # Extract user attributes (from federated identity or custom attributes)
+        user_attributes = event["request"].get("userAttributes", {})
+        department = user_attributes.get("custom:department", "")
+
+        # Simple mapping: Engineering department gets Developer group
+        if department == "Engineering":
+            # Copy existing group configuration to preserve current groups
+            group_config = event["request"].get("groupConfiguration", {})
+            existing_groups = group_config.get("groupsToOverride", [])
+
+            # Add Developer group if not already present
+            if "Developer" not in existing_groups:
+                # Assign to Developer group (which maps to Developer IAM role in Identity Pool)
+                cognito_client.admin_add_user_to_group(
+                    UserPoolId=user_pool_id,
+                    Username=username,
+                    GroupName="Developer",
+                )
+
+                # Copy the entire group configuration and add the new group
+                updated_group_config = group_config.copy()
+                updated_group_config["groupsToOverride"] = existing_groups + ["Developer"]
+
+                # Update the current token being generated
+                event["response"]["claimsOverrideDetails"] = {
+                    "groupOverrideDetails": updated_group_config,
+                }
+
+        # Note: Identity Pool will later map 'Developer' group to Developer IAM role
+        # when user requests AWS credentials for API calls
+
+    return event
+```
+
+**Use Cases for Dynamic Assignment:**
+- **Federated Identity Mapping**: Map `custom:department` from external identity providers to Cognito groups (e.g., Engineering → Developer group)
+- **Conditional Access**: Assign groups based on user attributes during first authentication
+- **Zero Manual Setup**: Users get proper permissions immediately without admin intervention
+- **Identity Provider Integration**: Works seamlessly with any SAML/OIDC provider that sends department/role attributes
+
+### Authorization Flow Summary
+
+```
+Internet Request
+       ↓
+┌─────────────────┐
+│ 1. API Gateway  │ ← Public endpoints (no auth required)
+│    Endpoint     │
+└─────────────────┘
+       ↓
+┌─────────────────┐
+│ 2. IAM Auth     │ ← AWS credentials validation
+│    Validation   │   • Any AWS creds for /test/public
+└─────────────────┘   • Cognito-issued creds for /test/auth
+       ↓
+┌─────────────────┐
+│ 3. Role-Based   │ ← IAM role permissions check
+│    IAM Policy   │   • Unauthenticated → limited access
+└─────────────────┘   • Authenticated → broader access
+       ↓               • Group-mapped → specialized access
+┌─────────────────┐
+│ 4. Lambda       │ ← JWT parsing for user-specific logic
+│    Fine-Grained │   • Resource ownership checks
+└─────────────────┘   • Custom attribute validation
+       ↓               • Business rule enforcement
+┌─────────────────┐
+│ 5. Business     │ ← Your application logic
+│    Logic        │
+└─────────────────┘
+```
+
+The architecture provides multiple authorization layers from public access to fine-grained user-specific permissions.
 
 ## 🔧 Lambda Function Purpose
 
@@ -225,6 +443,175 @@ The `lambda_function.py` serves as a **demonstration backend** that showcases ho
 ```
 
 This pattern demonstrates how to build **stateless, secure APIs** that can make authorization decisions based on user identity and group membership.
+
+## 🔐 Role-Based Access Control (RBAC) Implementation
+
+This architecture provides a foundation for implementing RBAC by combining **Cognito groups** (coarse-grained) with **user.userId-based permissions** (fine-grained):
+
+### The Two-Layer Authorization Model
+
+**Layer 1: Cognito Groups (Application-Level Roles)**
+- **What**: Broad application roles (`Admin`, `Viewer`, `Manager`, `Editor`)
+- **Where**: Stored in JWT token as `cognito:groups` claim
+- **Used for**: Feature access, UI visibility, API endpoint authorization
+- **Performance**: Fast - no database lookup required
+
+**Layer 2: User Permissions (Resource-Level Access)**
+- **What**: Specific resource ownership and granular permissions
+- **Where**: Stored in DynamoDB or other database, keyed by `user.userId` (Cognito `sub`)
+- **Used for**: Document ownership, team memberships, custom business rules
+- **Performance**: Single database query per authorization check
+
+### Integration Architecture
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   API Gateway   │    │   Lambda API     │    │   DynamoDB      │
+│   (AWS IAM)     │    │   Function       │    │   Permissions   │
+│                 │    │                  │    │                 │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+         │                        │                       │
+         │ 1. Request +           │                       │
+         │ X-Cognito-Id-Token     │                       │
+         ├───────────────────────►│                       │
+         │                        │ 2. Extract groups     │
+         │                        │ from JWT token        │
+         │                        │                       │
+         │                        │ 3. Query user perms   │
+         │                        │ by user.userId        │
+         │                        ├──────────────────────►│
+         │                        │                       │
+         │                        │ 4. Permission data    │
+         │                        │◄──────────────────────┤
+         │                        │                       │
+         │ 5. API response        │                       │
+         │◄───────────────────────┤                       │
+```
+
+**Note:** API Gateway still uses **AWS IAM authorization** - the Lambda function is your regular API endpoint that simply checks permissions as part of its business logic.
+
+### How Components Work Together
+
+**1. Cognito Groups Handle High-Level Access:**
+```python
+# In Lambda function - extract from JWT (no DB query)
+user_groups = jwt_payload.get("cognito:groups", [])
+
+# Quick feature access decisions
+if "Admin" in user_groups:
+    return allow_all_access()
+if "Viewer" in user_groups and request_method == "GET":
+    return continue_to_resource_check()
+```
+
+**2. DynamoDB Handles Fine-Grained Permissions:**
+```python
+# Query by user.userId for resource-specific permissions
+user_id = jwt_payload.get("sub")  # Cognito user ID
+permissions = dynamodb.get_item(
+    Key={"user_id": user_id, "resource_id": resource_id}
+)
+
+# Business logic decisions
+if permissions.get("owner") == user_id:
+    return allow_access()
+if user_id in permissions.get("collaborators", []):
+    return allow_read_only()
+```
+
+### DynamoDB Permission Store Design
+
+**Why DynamoDB is Perfect for This:**
+- **Fast lookups** by `user_id` and `resource_id`
+- **Schema flexibility** for evolving permission structures
+- **Serverless** - fits the architecture perfectly
+- **Global Secondary Indexes** for querying by resource or team
+- **TTL support** for temporary permissions
+
+**Key Access Patterns:**
+```python
+# Pattern 1: User's permissions on specific resource
+{
+    "user_id": "user-123",           # Partition key
+    "resource_id": "doc-456",        # Sort key
+    "permissions": ["read", "write"],
+    "granted_by": "admin-789",
+    "expires_at": 1234567890
+}
+
+# Pattern 2: Team memberships (using GSI)
+{
+    "user_id": "user-123",
+    "team_id": "team-abc",           # GSI partition key
+    "role": "manager",
+    "resource_type": "team_membership"
+}
+```
+
+### Lambda Authorization Flow
+
+**Simple Integration Example:**
+```python
+def lambda_handler(event, context):
+    # Step 1: Extract user info from custom header
+    user_info, user_groups = get_user_info_from_token(event)
+
+    # Step 2: Quick group-based checks (no DB query needed)
+    if "Admin" in user_groups:
+        # Admin can access everything - proceed with full business logic
+        return handle_admin_request(event, user_info)
+
+    # Step 3: Resource-specific authorization (DynamoDB query if needed)
+    resource_id = event["pathParameters"].get("id")
+    user_id = user_info["sub"]
+
+    has_permission = check_user_permission(user_id, resource_id, "read")
+
+    if has_permission or "Manager" in user_groups:
+        return handle_authorized_request(event, user_info)
+    else:
+        return {"statusCode": 403, "body": "Access denied"}
+
+def check_user_permission(user_id, resource_id, action):
+    # Single DynamoDB query for fine-grained permissions
+    response = dynamodb.get_item(
+        Key={"user_id": user_id, "resource_id": resource_id}
+    )
+    permissions = response.get("Item", {}).get("permissions", [])
+    return action in permissions
+
+def handle_authorized_request(event, user_info):
+    # Your actual business logic here
+    return {
+        "statusCode": 200,
+        "body": json.dumps({
+            "message": "Success!",
+            "data": get_user_specific_data(user_info["sub"])
+        })
+    }
+```
+
+### Real-World Usage Examples
+
+**Document Management System:**
+- **Cognito Groups**: `Editor` can create documents, `Viewer` can only read
+- **User Permissions**: Each document has specific collaborators beyond group rules
+- **Integration**: Check group first (fast), then document ownership (DynamoDB)
+
+**Multi-Tenant Application:**
+- **Cognito Groups**: `OrgAdmin` manages organization, `User` accesses resources
+- **User Permissions**: Each user belongs to specific organizations and projects
+- **Integration**: Group defines scope, DynamoDB defines which orgs/projects
+
+### Integration Benefits
+
+1. **Performance**: Group checks are instant, permission checks are single queries
+2. **Scalability**: Cognito handles millions of users, DynamoDB scales permissions independently
+3. **Flexibility**: Add new groups without DB changes, add new permissions without Cognito changes
+4. **Maintainability**: Clear separation between broad roles and specific permissions
+5. **Cost-Effective**: Only query DynamoDB when needed, leverage JWT caching
+
+The architecture separates concerns between coarse-grained group permissions and fine-grained resource permissions.
 
 ## 🔑 The X-Cognito-Id-Token Header Explained
 
@@ -405,9 +792,9 @@ export VITE_REDIRECT_SIGN_OUT="https://cloudfront-domain/"
 
 ## 🌐 Federation & Extensibility
 
-This architecture is designed for **enterprise scalability** and can be easily extended with **federated identity providers** such as Okta, Auth0, PingFederation, Azure AD, and other SAML/OIDC providers through Cognito's flexible identity federation capabilities.
+This architecture supports federated identity providers such as Okta, Auth0, PingFederation, Azure AD, and other SAML/OIDC providers through Cognito's identity federation capabilities.
 
-### Extension Benefits
+### Federation Capabilities
 
 1. **Single Sign-On (SSO)**: Users authenticate once across all corporate applications
 2. **Centralized User Management**: Leverage existing corporate directories
@@ -416,7 +803,7 @@ This architecture is designed for **enterprise scalability** and can be easily e
 5. **Zero-Trust Architecture**: Fine-grained access control through IAM policies
 6. **Scalability**: Handle millions of users across multiple identity sources
 
-This makes the demo a **foundation for enterprise authentication** rather than just a learning exercise.
+The architecture supports enterprise authentication patterns through Cognito's federation capabilities.
 
 ## 🚀 Production Considerations
 
