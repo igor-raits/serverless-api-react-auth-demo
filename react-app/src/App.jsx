@@ -18,6 +18,7 @@ const App = () => {
   const [loading, setLoading] = useState(true)
   const [apiResponse, setApiResponse] = useState('')
   const [apiLoading, setApiLoading] = useState(false)
+  const [apiResponseStatus, setApiResponseStatus] = useState(null) // Track response status for styling
   const [cachedSession, setCachedSession] = useState(null) // Cache session to avoid redundant calls
 
   // Handle OAuth callback route
@@ -98,6 +99,7 @@ const App = () => {
   const callAPI = async (endpoint, useIAM = false) => {
     setApiLoading(true)
     setApiResponse('')
+    setApiResponseStatus(null) // Reset status
 
     try {
       if (useIAM) {
@@ -160,6 +162,7 @@ const App = () => {
 
           // Always show the response, regardless of status code
           setApiResponse(`Status: ${response.statusCode}\n\n${data}`)
+          setApiResponseStatus(response.statusCode)
         } catch (amplifyError) {
           // Amplify throws errors for non-2xx status codes, extract the response body
           const errorResponse = amplifyError._response || amplifyError.response
@@ -171,6 +174,7 @@ const App = () => {
               : JSON.stringify(errorResponse.body)
 
             setApiResponse(`Status: ${errorResponse.statusCode}\n\n${responseBody}`)
+            setApiResponseStatus(errorResponse.statusCode)
           } else {
             // Re-throw if it's not an HTTP response error
             throw amplifyError
@@ -192,6 +196,7 @@ const App = () => {
 
         // Always show the response with status, regardless of success/error
         setApiResponse(`Status: ${response.status}\n\n${data}`)
+        setApiResponseStatus(response.status)
       }
     } catch (error) {
       console.error('API call error:', error)
@@ -200,9 +205,11 @@ const App = () => {
       if (error.status) {
         // Regular fetch error with status
         setApiResponse(`Status: ${error.status}\n\n${error.message || error.toString()}`)
+        setApiResponseStatus(error.status)
       } else {
         // Generic error without status info
         setApiResponse(`Error: ${error.message || error.toString()}`)
+        setApiResponseStatus('error') // Use 'error' for non-HTTP errors
       }
     } finally {
       setApiLoading(false)
@@ -218,6 +225,18 @@ const App = () => {
     } catch (error) {
       return `Error decoding token: ${error.message}`
     }
+  }
+
+  const getResponseClass = (status) => {
+    if (!status) return ''
+
+    if (status === 'error') return 'error'
+
+    const statusCode = parseInt(status)
+    if (statusCode >= 200 && statusCode < 300) return 'success'
+    if (statusCode >= 400) return 'error'
+
+    return '' // For 1xx, 3xx codes
   }
 
   if (loading) {
@@ -325,7 +344,7 @@ const App = () => {
         {apiLoading && <p className="loading">Calling API...</p>}
 
         {apiResponse && (
-          <div className="api-response">
+          <div className={`api-response ${getResponseClass(apiResponseStatus)}`}>
             <h4>API Response:</h4>
             {apiResponse}
           </div>
