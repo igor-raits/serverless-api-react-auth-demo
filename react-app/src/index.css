@@ -66,6 +66,22 @@ body {
   border-radius: 4px;
   padding: 1rem;
   margin-top: 1rem;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.token-decoded pre {
+  margin: 0;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+  white-space: pre;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+}
+
+.token-decoded h4 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
 }
 
 .api-section {
@@ -112,6 +128,11 @@ body {
   margin-top: 1rem;
   font-family: 'Courier New', monospace;
   white-space: pre-wrap;
+}
+
+.api-response h4 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
 }
 
 .loading {
