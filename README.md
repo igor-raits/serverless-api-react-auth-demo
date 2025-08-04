@@ -112,7 +112,7 @@ This creates:
 
 ```bash
 # Build and deploy React app
-./build-and-deploy.sh
+./run.sh
 ```
 
 The script will:
@@ -155,7 +155,7 @@ python test_auth.py
 ├── fe.tf                          # S3 + CloudFront frontend
 ├── outputs.tf                     # Terraform outputs
 ├── lambda_function.py             # Lambda backend code
-├── build-and-deploy.sh            # React deployment script
+├── run.sh                         # React development and deployment script
 ├── manage-users.sh                # Cognito user management
 ├── test_auth.py                   # Python API testing script
 └── react-app/
@@ -763,7 +763,7 @@ aws cognito-idp admin-set-user-password \
 
 ### Environment Variables (React App)
 
-The `build-and-deploy.sh` script automatically sets these during build:
+The `run.sh` script automatically sets these during build:
 
 ```bash
 export VITE_USER_POOL_ID="us-east-1_XXXXXXXXX"

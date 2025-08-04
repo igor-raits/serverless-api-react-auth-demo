@@ -52,8 +52,14 @@ resource "aws_cognito_user_pool_client" "default" {
 
   # OAuth settings for Managed Login (modern replacement for deprecated Hosted UI)
   generate_secret = false
-  callback_urls   = ["https://${module.cloudfront.cloudfront_distribution_domain_name}/callback"]
-  logout_urls     = ["https://${module.cloudfront.cloudfront_distribution_domain_name}/"]
+  callback_urls = concat(
+    ["https://${module.cloudfront.cloudfront_distribution_domain_name}/callback"],
+    var.cognito_callback_urls_extra
+  )
+  logout_urls = concat(
+    ["https://${module.cloudfront.cloudfront_distribution_domain_name}/"],
+    var.cognito_logout_urls_extra
+  )
 
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_flows_user_pool_client = true

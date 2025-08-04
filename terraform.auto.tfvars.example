@@ -5,5 +5,8 @@
 aws_region  = "us-east-1"
 aws_profile = "your-profile-name"  # Replace with your AWS CLI profile
 
-# CORS Configuration (optional)
-# apigw_cors_allow_origins_extra = ["http://localhost:3000", "http://localhost:5173"]
+# Development Configuration (optional)
+# Uncomment these lines to enable local development
+# apigw_cors_allow_origins_extra = ["http://localhost:5173"]
+# cognito_callback_urls_extra = ["http://localhost:5173/callback"]
+# cognito_logout_urls_extra = ["http://localhost:5173/"]

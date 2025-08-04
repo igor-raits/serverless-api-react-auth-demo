@@ -15,3 +15,15 @@ variable "apigw_cors_allow_origins_extra" {
   type        = list(string)
   default     = []
 }
+
+variable "cognito_callback_urls_extra" {
+  description = "Additional OAuth callback URLs (e.g., http://localhost:5173/callback for development)"
+  type        = list(string)
+  default     = []
+}
+
+variable "cognito_logout_urls_extra" {
+  description = "Additional OAuth logout URLs (e.g., http://localhost:5173/ for development)"
+  type        = list(string)
+  default     = []
+}
